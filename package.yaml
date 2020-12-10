@@ -1,0 +1,19 @@
+name: err
+version: 0.1.0.0
+synopsis: To Err is Human - Error Handling with pretty loquated error messages.
+maintainer: Imuli <i@imu.li>
+github: imuli/err
+license: Unlicense
+license-file: UNLICENSE
+category: Error Handling
+description: Locale sensitive error messages with context.
+
+ghc-options: -Wall
+
+dependencies:
+  - base ^>= 4.13
+  - loquacious ^>= 0.1
+  - text ^>= 1.2
+
+library:
+  source-dirs: src
