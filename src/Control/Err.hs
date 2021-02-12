@@ -135,10 +135,3 @@ infixl 0 ?
 (?) :: forall t l a f. (Throw f (Err l), Loquate l t)
     => f (Err l) a -> t -> f (Err l) a
 (?) = flip note
-
--- | Error type for failed lookups of all kinds
-newtype NotFound t = NotFound t
-  deriving (Eq, Functor, Generic, Ord, Read, Show)
-
-instance Loquate l t => Loquate l (NotFound t) where
-  loq l (NotFound x) = "NotFound" <+> loq l x
