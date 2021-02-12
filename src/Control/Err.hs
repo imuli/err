@@ -1,89 +1,144 @@
+{-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE DefaultSignatures #-}
+{-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE DeriveTraversable #-}
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE QuantifiedConstraints #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
 {- Module      : Control.Err
    Copyright   : Public Domain
    Description : Locale Sensitive Error Messages
 -}
-module Control.Err where
+module Control.Err
+  ( -- Exception type tracking
+    Throw(..)
+  , Catch(..)
+    -- 'Err's, loquatable exceptions.
+  , Err
+  , toErr
+  , fromErr
+    -- Throwing and Catching 'Err's
+  , throwErr
+  , catchErr
+  , note
+  , (?)
+  , ThrowE
+  , CatchE
+  ) where
 
-import           Control.Applicative
-import           Control.Exception (Exception, throwIO)
-import qualified Control.Exception as IO
-import           Control.Monad.IO.Class
-import           Data.Default.Class
-import           Data.Typeable
-import           GHC.Stack
-import           Text.Loquate (Loquate(..))
-import           Text.Loquate.Doc ((<+>))
+import           Control.Applicative (Alternative(empty))
+import           Control.Exception (Exception)
+import           Data.Default.Class (Default(def))
+import           Data.Maybe (catMaybes)
+import           Data.Typeable (cast)
+import           GHC.Generics (Generic)
+import           GHC.Stack (HasCallStack, callStack, getCallStack, withFrozenCallStack)
+import           Text.Loquate (Lang, Loq(Loq), Loquate(loq))
+import           Text.Loquate.Doc (align, nest, sep, softline, vsep, (<+>))
 
--- | Encapsulate an error type with a particular locale or locales.
-data Err l = forall t. (HasCallStack, Default l, Loquate l t, Typeable t) => Err t
+-- | Encapsulate an error type with a particular locale or locales, with a list
+-- of information about it.
+data Err l = forall t. (HasCallStack, Loquate l t) => Err [Loq l] t
 
-instance (Default l) => Show (Err l) where
+instance (Lang l) => Show (Err l) where
   show = show . loq @l def
 
-instance (Default l, Typeable l) => Exception (Err l)
+instance (Lang l) => Exception (Err l)
 
-instance Loquate l (Err l) where
-  loq l (Err x) = loq l x <+> "at" <+> loq l (popCallStack callStack)
+instance (Lang l, l ~ l') => Loquate l' (Err l) where
+  loq l (Err ms x) = loq l x <> nest 2 (softline <> align (vsep $ catMaybes [stack, notes]))
+    where
+      stack | null (getCallStack callStack) = Nothing
+            | otherwise = Just $ "@" <+> loq l callStack
+      notes | null ms = Nothing
+            | otherwise = Just $ "?" <+> (align . sep $ loq l <$> ms)
 
--- | Convert something to and from an Err.
-class (Default l, Typeable l, Loquate l t, Typeable t) => IsErr l t where
-  toErr :: t -> Err l
-  toErr = Err
-  fromErr :: Err l -> Maybe t
-  fromErr (Err x) = cast x
+toErr :: (HasCallStack, Loquate l t) => t -> Err l
+toErr = withFrozenCallStack $ Err []
 
-instance (Typeable l, Default l) => IsErr l (Err l) where
-  toErr = id
-  fromErr = Just
+fromErr :: Loquate l t => Err l -> Maybe t
+fromErr (Err _ x) = cast x
 
-instance (Typeable l, Default l) => IsErr l ()
-
--- | Throwing errors mirrors 'pure' from 'Applicative'.
-class Applicative (f (Err l)) => ThrowErr f l where
-  err :: (IsErr l t, HasCallStack) => t -> f (Err l) a
+-- | Throwing errors mirrors 'pure' from 'Applicative', whilst transforming
+-- them mirrors 'fmap'.
+class Applicative (f e) => Throw f e where
+  -- | Like 'pure', for the first type argument.
+  throw :: HasCallStack => e -> f e a
+  -- | Like 'fmap' for the first type argument.
+  amend :: Throw f e' => f e a -> (e -> e') -> f e' a
+  default amend :: (Catch f e, Throw f e') => f e a -> (e -> e') -> f e' a
+  amend a f = catch a (throw . f)
 
 -- | Catching errors mirrors '>>=' from 'Monad'.
-class (Monad (f (Err l)), ThrowErr f l) => CatchErr f l where
-  catchErr :: f (Err l) a -> (Err l -> f (Err l) a) -> f (Err l) a
+class (Monad (f e), Throw f e) => Catch f e where
+  catch :: Throw f e' => f e a -> (e -> f e' a) -> f e' a
 
--- | Catch a particular type of error.
-catch :: (IsErr l e, CatchErr f l) => f (Err l) a -> (e -> f (Err l) a) -> f (Err l) a
-catch x handle = catchErr x $ \e -> maybe (err e) handle $ fromErr e
+instance Throw Either e where
+  throw = Left
+instance Catch Either e where
+  catch (Left e) f  = f e
+  catch (Right a) _ = Right a
 
--- | 'IO' 'Monad' wrapper for explicitely tracking error types.
---
--- Terms of the left type are stored in as 'Exception's, among other things,
--- this enables explicit tracking of possible (synchronous) exceptions.
-newtype ErrIO a b = ErrIO { runErrIO :: IO b }
+-- | Wrap an instance of 'Alternative' with an extra type argument to discard
+-- all 'throw'n errors, instead returning 'empty'.
+newtype ThrowT f e a = ThrowT { runThrowT :: f a }
+  deriving
+     ( Alternative
+     , Applicative
+     , Eq
+     , Foldable
+     , Functor
+     , Generic
+     , Monad
+     , MonadFail
+     , Monoid
+     , Ord
+     , Read
+     , Semigroup
+     , Show
+     , Traversable
+     )
 
-instance (Exception a) => MonadIO (ErrIO a) where
-  liftIO = ErrIO
+instance Alternative f => Throw (ThrowT f) e where
+  throw _ = ThrowT empty
+  amend (ThrowT x) _ = ThrowT x
 
-instance (Exception a) => Functor (ErrIO a) where
-  fmap f (ErrIO x) = ErrIO $ fmap f x
+type ThrowE f l a = Throw f (Err l) => f (Err l) a
+type CatchE f l a = Catch f (Err l) => f (Err l) a
 
-instance (Exception a) => Applicative (ErrIO a) where
-  pure = ErrIO . pure
-  liftA2 f (ErrIO x) (ErrIO y) = ErrIO $ liftA2 f x y
+-- | Throw some 'Err'or in a particular language.
+throwErr :: forall l e a f. (Throw f (Err l), Loquate l e, HasCallStack) => e -> f (Err l) a
+throwErr = withFrozenCallStack $ throw . toErr @l
 
-instance (Exception a) => Monad (ErrIO a) where
-  (ErrIO x) >>= f = ErrIO $ x >>= runErrIO . f
+-- | Catch errors in a particular language.
+catchErr :: forall l e a f. (Loquate l e, Catch f (Err l))
+         => f (Err l) a -> (e -> f (Err l) a) -> f (Err l) a
+catchErr x handle = catch x $ \e -> maybe (throw e) handle $ fromErr e
 
-instance (Exception a) => Alternative (ErrIO a) where
-  empty = ErrIO . throwIO $ Err @() ()
-  ErrIO x <|> ErrIO y = ErrIO $ x `IO.catch` (\(_ :: a) -> y)
+-- | Add a note (any item that may be loquated) to a 'throw'n 'Err'.
+note :: forall l a f t. (Throw f (Err l), Loquate l t)
+     => t -> f (Err l) a -> f (Err l) a
+note x = withFrozenCallStack $ flip amend $ \(Err xs l) -> Err (Loq x:xs) l
 
-instance (Default l, Typeable l) => ThrowErr ErrIO l where
-  err = ErrIO . throwIO . Err @l
+infixl 0 ?
+-- | A flipped version of 'note'.
+(?) :: forall t l a f. (Throw f (Err l), Loquate l t)
+    => f (Err l) a -> t -> f (Err l) a
+(?) = flip note
 
-instance (Default l, Typeable l) => CatchErr ErrIO l where
-  catchErr (ErrIO x) handle = ErrIO . IO.catch x $ runErrIO . handle
+-- | Error type for failed lookups of all kinds
+newtype NotFound t = NotFound t
+  deriving (Eq, Functor, Generic, Ord, Read, Show)
+
+instance Loquate l t => Loquate l (NotFound t) where
+  loq l (NotFound x) = "NotFound" <+> loq l x
