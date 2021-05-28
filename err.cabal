@@ -1,18 +1,18 @@
-cabal-version: 2.2
+cabal-version: 1.12
 
 -- This file has been generated from package.yaml by hpack version 0.34.2.
 --
 -- see: https://github.com/sol/hpack
 
 name:           err
-version:        0.1.0.0
-synopsis:       To Err is Human - Error Handling with locale-sensitive error messages.
-description:    Locale sensitive error messages with context.
+version:        0.2.0
+synopsis:       To Err is Human - Error Handling with loquacious error messages.
+description:    Errors with pretty (and localisable) messages that can be easily decomposed.
 category:       Error Handling
 homepage:       https://github.com/imuli/err#readme
 bug-reports:    https://github.com/imuli/err/issues
 maintainer:     Imuli <i@imu.li>
-license:        Unlicense
+license:        PublicDomain
 license-file:   UNLICENSE
 build-type:     Simple
 
@@ -22,18 +22,16 @@ source-repository head
 
 library
   exposed-modules:
-      Control.Alt
-      Control.Alternate
       Control.Err
-      Err.IOErr
+      Err.NotFound
   other-modules:
       Paths_err
   hs-source-dirs:
       src
   ghc-options: -Wall
   build-depends:
-      base >=4.13 && <4.14
-    , data-default-class >=0.1 && <0.2
-    , loquate >=0.1 && <0.2
-    , text >=1.2 && <1.3
+      base >=4.11 && <5.0
+    , loquacious >=0.1 && <0.2
+    , prettyprinter >=1.2 && <2.0
+    , text >=1.0 && <2.0
   default-language: Haskell2010

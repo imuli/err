@@ -1,16 +1,14 @@
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DeriveTraversable #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RankNTypes #-}
-{- Module      : Err.NotFound
-   Copyright   : Public Domain
-   Description : The NotFound Err
+{-|
+Module      : Err.NotFound
+Copyright   : Public Domain
+Description : The NotFound Err
+Stability   : experimental
 -}
+
 module Err.NotFound
   ( NotFound(..)
   , maybeNF
@@ -19,33 +17,35 @@ module Err.NotFound
   , filterNF
   ) where
 
-import           Control.Err
+import           Control.Err (Throw, throw)
 import           Data.Foldable (find)
+import           Data.Text.Prettyprint.Doc ((<+>))
 import           GHC.Generics (Generic)
-import           Text.Loquate (Loquate(loq))
-import           Text.Loquate.Doc ((<+>))
+import           Text.Loquacious (Loquacious(fromLoq, loq, toLoq), fromLoqTraversable, toLoqFunctor)
 
 -- | Error type for failed lookups of all kinds
 newtype NotFound t = NotFound t
   deriving (Eq, Foldable, Functor, Generic, Ord, Read, Show, Traversable)
 
-instance Loquate l t => Loquate l (NotFound t) where
-  loq l (NotFound x) = "NotFound" <+> loq l x
+instance Loquacious t => Loquacious (NotFound t) where
+  loq l (NotFound x) = "NotFound" <+> l x
+  toLoq = toLoqFunctor
+  fromLoq = fromLoqTraversable
 
 -- | extract the contents of a maybe, throwing 'NotFound' on 'Nothing'
-maybeNF :: Loquate l t => t -> Maybe a -> ThrowE m l a
-maybeNF m = maybe (throwErr $ NotFound m) pure
+maybeNF :: (Loquacious x, Applicative t, Throw t) => x -> Maybe a -> t a
+maybeNF m = maybe (throw $ NotFound m) pure
 
 -- | take the head of a list, throwing 'NotFound' for an empty list
-headNF :: Loquate l t => t -> [a] -> ThrowE m l a
+headNF :: (Loquacious x, Applicative t, Throw t) => x -> [a] -> t a
 headNF _ (x:_) = pure x
-headNF m []    = throwErr (NotFound m)
+headNF m []    = throw (NotFound m)
 
 -- | extract the first value matching a predicate from some container, throwing
 -- 'NotFound' if there is none
-findNF :: (Loquate l t, Foldable f) => t -> (a -> Bool) -> f a -> ThrowE m l a
+findNF :: (Loquacious x, Foldable f, Applicative t, Throw t) => x -> (a -> Bool) -> f a -> t a
 findNF m p = maybeNF m . find p
 
 -- | check whether some value in a monad meets a predicate, throwing 'NotFound' if it doesn't
-filterNF :: (Loquate l t, Monad (m (Err l))) => t -> (a -> Bool) -> ThrowE m l a -> ThrowE m l a
-filterNF m p = (=<<) $ \x -> if p x then pure x else throwErr (NotFound m)
+filterNF :: (Loquacious x, Monad t, Throw t) => x -> (a -> Bool) -> t a -> t a
+filterNF m p = (=<<) $ \x -> if p x then pure x else throw (NotFound m)
